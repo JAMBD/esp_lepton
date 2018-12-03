@@ -1,0 +1,8 @@
+[submodule "libesphttpd"]
+    path = libesphttpd
+    url = https://github.com/Spritetm/libesphttpd.git
+    ignore = dirty
+[submodule "esp-open-sdk"]
+    path = esp-open-sdk
+    url = https://github.com/pfalcon/esp-open-sdk.git
+    ignore = dirty

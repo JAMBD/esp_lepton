@@ -37,8 +37,6 @@
 #include "driver/sdio_slv.h"
 #include "driver/spi_interface.h"
 #include "user.h"
-#include "LEPTON_SDK.h"
-#include "LEPTON_Types.h"
 //The example can print out the heap use every 3 seconds. You can use this to catch memory leaks.
 #define SHOW_HEAP_USE
 
@@ -49,6 +47,7 @@
 #define SYS (0x02)
 #define VID (0x03)
 #define OEM (0x08)
+#define RAD (0x0E)
 
 #define GET (0x00)
 #define SET (0x01)
@@ -323,7 +322,7 @@ void lepton_command(unsigned int moduleID, unsigned int commandID, unsigned int 
 
     if (moduleID == 0x08) //OEM module ID
     {
-        i2c_write(0x48);
+        i2c_write(moduleID | 0x40);
     }
     else
     {
@@ -448,12 +447,9 @@ void  ICACHE_FLASH_ATTR user_init(void) {
 
     i2c_init();
 
-    //os_printf("SYS Flir Serial Number");
-    //lepton_command(SYS, 0x2 , GET);
+    os_printf("SYS Flir Serial Number\r\n");
+    lepton_command(SYS, 0x2 , GET);
     //read_data();
-
-    //LEP_CAMERA_PORT_DESC_T _port; LEP_OpenPort(1, LEP_CCI_TWI, 400, &_port);
-    //LEP_RunSysFFCNormalization(&_port);
 
     testi2s_init();
     system_os_task(loop, user_procTaskPrio,user_procTaskQueue, user_procTaskQueueLen);

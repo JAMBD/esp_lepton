@@ -23,7 +23,6 @@
 #ifndef I2C_H_
 #define I2C_H_
 
-#include "esp_I2C.h"
 #include "inttypes.h"
 
 /**

@@ -320,9 +320,9 @@ void lepton_command(unsigned int moduleID, unsigned int commandID, unsigned int 
     i2c_write(0x00);
     i2c_write(0x04);
 
-    if (moduleID == 0x08) //OEM module ID
+    if (moduleID == OEM || moduleID == RAD) //OEM module ID
     {
-        i2c_write(moduleID | 0x40);
+        i2c_write(0x40 | moduleID);
     }
     else
     {

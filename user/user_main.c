@@ -33,7 +33,7 @@
 #include "gpio.h"
 #include "driver/slc_register.h"
 #include "driver/spi.h"
-#include "driver/i2c.h"
+#include "esp_i2c.h"
 #include "driver/sdio_slv.h"
 #include "driver/spi_interface.h"
 #include "user.h"
@@ -90,6 +90,8 @@ uint16_t frame_cnt = 0;
 uint8_t volatile capture_state = CAPTURE_START;
 
 int read_reg(unsigned int reg);
+void write_reg(unsigned int reg, uint16_t val);
+int8_t lepton_command(unsigned int moduleID, unsigned int commandID, unsigned int command);
 
 //Broadcast the uptime in seconds every second over connected websockets
 static void  websockTimerCb(void *arg) {
@@ -274,12 +276,38 @@ static void ICACHE_FLASH_ATTR prHeapTimerCb(void *arg) {
     }
     camErr = 1;
 
-    os_printf("I2C:%02x\n",read_reg(0x02));
+    static uint8_t startup = false;
+    if (!startup){
+        if (lepton_command(SYS, 0x08 , GET) == 0){
+            startup = true;
+        }else{
+            os_printf("Waiting Camera startup\r\n");
+            return;
+        }
+        os_printf("SYS Flir Serial Number\r\n");
+        os_printf("0x%04x ", read_reg(0x000E));
+        os_printf("%04x ", read_reg(0x000C));
+        os_printf("%04x ", read_reg(0x000A));
+        os_printf("%04x \r\n", read_reg(0x0008));
+
+        os_printf("SYS Flir uptime\r\n");
+        lepton_command(SYS, 0x0C , GET);
+        os_printf("0x%04x ", read_reg(0x000A));
+        os_printf("%04x \r\n", read_reg(0x0008));
+        
+        os_printf("RAD enable\r\n");
+        lepton_command(RAD, 0x10 , GET);
+        os_printf("0x%04x ", read_reg(0x000A));
+        os_printf("%04x ", read_reg(0x0008));
+        write_reg(0x0008, 0x0000);
+        lepton_command(RAD, 0x10 , SET);
+    }
+    os_printf("I2C:%04x\n",read_reg(0x0002));
 }
 #endif
 
 
-    void ICACHE_FLASH_ATTR
+void ICACHE_FLASH_ATTR
 user_set_softap_config(void)
 {
     struct softap_config config;
@@ -312,87 +340,63 @@ static void loop(os_event_t *events){
 
 
 
-void lepton_command(unsigned int moduleID, unsigned int commandID, unsigned int command)
+int8_t lepton_command(unsigned int moduleID, unsigned int commandID, unsigned int command)
 {
-    i2c_beginTransmission(ADDRESS);
-
-    // Command Register is a 16-bit register located at Register Address 0x0004
-    i2c_write(0x00);
-    i2c_write(0x04);
-
-    if (moduleID == OEM || moduleID == RAD) //OEM module ID
-    {
-        i2c_write(0x40 | moduleID);
+    uint16_t reg = 0x0004;
+    uint8_t i2c_data[4];
+    i2c_data[0] = reg >> 8 & 0xFF;
+    i2c_data[1] = reg & 0xFF;
+    i2c_data[2] = moduleID;
+    if (moduleID == OEM || moduleID == RAD){
+        i2c_data[2] |= 0x40;
     }
-    else
-    {
-        i2c_write(moduleID & 0x0f);
+    i2c_data[3] = (commandID & 0xFC) | (command & 0x03);
+    uint16_t stat = read_reg(0x0002);
+    while (stat & 0x0001 != 0){
+        if (stat & 0x006 != 0x006){
+            // Lepton not booted.
+            return 1;
+        }
+        stat = read_reg(0x0002);
     }
-    i2c_write( ((commandID << 2 ) & 0xfc) | (command & 0x3));
-    i2c_stop();
+    esp_i2c_write_buf(ADDRESS, i2c_data, 4, true);
+    stat = read_reg(0x0002);
+    while (stat & 0x0001 != 0){
+        stat = read_reg(0x0002);
+    }
+    if ((stat & 0xFF00) != 0){
+        os_printf("error: %d\r\n", (int8_t)(stat >> 8));
+    }
+
+    return 0;
 }
+
 
 void agc_enable()
 {
-    i2c_beginTransmission(ADDRESS); // transmit to device #4
-    i2c_write(0x01);
-    i2c_write(0x05);
-    i2c_write(0x00);
-    i2c_write(0x01);
-    i2c_stop();
 }
 
 void set_reg(unsigned int reg)
 {
-    i2c_beginTransmission(ADDRESS); // transmit to device #4
-    i2c_write(reg >> 8 & 0xff);
-    i2c_write(reg & 0xff);            // sends one uint8_t
-    i2c_stop();
+    uint8_t i2c_data[] = {(reg >> 8) & 0xFF, reg & 0xFF};
+    esp_i2c_write_buf(ADDRESS, i2c_data, 2, true);
 }
-
-//Status reg 15:8 Error Code  7:3 Reserved 2:Boot Status 1:Boot Mode 0:busy
+void write_reg(unsigned int reg, uint16_t val)
+{
+    uint8_t i2c_data[] = {(reg >> 8) & 0xFF, reg & 0xFF,
+                          (val >> 8) & 0xFF, val & 0xFF};
+    esp_i2c_write_buf(ADDRESS, i2c_data, 4, true);
+}
 
 int read_reg(unsigned int reg)
 {
-    int reading = 0;
     set_reg(reg);
-
-    i2c_requestFrom(ADDRESS);
-
-    reading = i2c_read();  // receive high uint8_t (overwrites previous reading)
-    reading = reading << 8;    // shift high uint8_t to be high 8 bits
-
-    reading |= i2c_read(); // receive low uint8_t as lower 8 bits
-    os_printf("REG %d: %x\n",reg,reading);
-
-    return reading;
+    uint8_t i2c_data[2];
+    esp_i2c_read_buf(ADDRESS, i2c_data, 2, true);
+    uint16_t data = i2c_data[0] << 8 | i2c_data[1];
+    return data;
 }
 
-void read_data()
-{
-    int i;
-    int data;
-    int payload_length;
-    i = 0;
-    while (read_reg(0x2) & 0x01)
-    {
-        if (++i > 10) break;
-        os_printf("busy\n");
-    }
-
-    payload_length = read_reg(0x6);
-    os_printf("LEN: %d\n",payload_length);
-
-    i2c_requestFrom(ADDRESS);
-    //set_reg(0x08);
-    for (i = 0; i < (payload_length / 2); i++)
-    {
-        data = i2c_read() << 8;
-        data |= i2c_read();
-        os_printf("%x\n",data);
-    }
-
-}
 
 //Main routine. Initialize stdout, the I/O, filesystem and the webserver and we're done.
 void  ICACHE_FLASH_ATTR user_init(void) {
@@ -445,11 +449,7 @@ void  ICACHE_FLASH_ATTR user_init(void) {
     os_timer_arm(&websockTimer, 15, 1);
     os_printf("\nReady\n");
 
-    i2c_init();
-
-    os_printf("SYS Flir Serial Number\r\n");
-    lepton_command(SYS, 0x2 , GET);
-    //read_data();
+    esp_i2c_init();
 
     testi2s_init();
     system_os_task(loop, user_procTaskPrio,user_procTaskQueue, user_procTaskQueueLen);

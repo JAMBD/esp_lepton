@@ -26,8 +26,6 @@ var c_v = [0.000, 0.390, 0.500, 1.000];
 
 
 
-
-
 function gen_lut(){
     var idx = 0;
     for (var i=0;i<16384;i++){
@@ -116,7 +114,17 @@ function init()
     testWebSocket();
     setInterval(
             function(){
-                stat_box.innerHTML = ;
+                var avg = 0;
+                var cnt = 0;
+                for (var x = 60-3; x < 60 + 4; x ++){
+                    for (var y = 80-3; x < 80 + 4; x ++){
+                       avg += raw[x*160+y];
+                        cnt ++;
+                    }
+                }
+                var scl = 0.04;
+                avg /= cnt;
+                stat_box.innerHTML = (max_rng * scl - 273.15).toFixed(2) + "C to " + (min_rng * scl - 273.15).toFixed(2) + "C ROI: " + (avg * scl - 273.15).toFixed(2) + "C";
                 ctxh.fillStyle = "#FFFFFF";
                 ctxh.fillRect(0, 0, 512, 50);
                 var start =  Math.min(min_rng, max_rng)>>5;
@@ -210,10 +218,15 @@ function onMessage(evt)
                                imgData.data[(x*160+y+3)*4] |= (rawData[i] << 6)&0xC0;
                                imgData.data[(x*160+y+3)*4+1] |= (rawData[i] >> 2)&0x3F;
                                for(var j=0;j<4;++j){
-                                   var dat = (imgData.data[(x*160+y+j)*4+1] << 8) + (imgData.data[(x*160+y+j)*4])
-                                       imgData.data[(x*160+y+j)*4+0]= lut[dat*3+0];
-                                   imgData.data[(x*160+y+j)*4+1]= lut[dat*3+1];
-                                   imgData.data[(x*160+y+j)*4+2]= lut[dat*3+2];
+                                   var dat = (imgData.data[(x*160+y+j)*4+1] << 8) + (imgData.data[(x*160+y+j)*4]);
+                                   if (Math.abs(x - 60) < 5 && Math.abs((y+j)-80) < 5){
+                                       if (!(Math.abs(x - 60) < 4 && Math.abs((y+j)-80) < 4)){
+                                          dat = (1<<14)-1;
+                                       }
+                                   }
+                                   imgData.data[(x*160+y+j)*4+0] = lut[dat*3+0];
+                                   imgData.data[(x*160+y+j)*4+1] = lut[dat*3+1];
+                                   imgData.data[(x*160+y+j)*4+2] = lut[dat*3+2];
                                    raw[x*160+y+j]= dat;
                                }
                                break;
